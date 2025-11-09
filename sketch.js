@@ -1,298 +1,384 @@
-/* global createCanvas, windowWidth, windowHeight, random, color, width, height, noStroke, fill, circle, PI, cos, sin, rectMode, CENTER, square, angleMode, background, windowResized, beginShape, endShape, vertex, TWO_PI, push, pop, stroke, strokeWeight, loadSound, noLoop, loop, mousePressed, userStartAudio, text, textSize, textAlign, dist, mouseX, mouseY, red, green, blue, CLOSE, translate */
+/*
+By Okazz
+*/
+let colors = ['#7bdff2', '#b2f7ef', '#f7d6e0', '#f2b5d4'];
+let ctx;
+let motions = [];
+let motionClasses = [];
+let sceneTimer = 0;
+let resetTime = 60 * 8.5;
+let fadeOutTime = 30;
 
-// 圓的總數
-const NUM_CIRCLES = 30;
-// 固定的顏色列表 (HEX 格式)
-const COLORS = [
-    '#ff595e', // +1 分
-    '#ffca3a', // +2 分
-    '#8ac926', // -1 分 (其他顏色)
-    '#1982c4', // +1 分
-    '#6a4c93'  // -1 分 (其他顏色)
-];
+// 新增：隱藏選單變數
+let menuWidth = 320;
+let menuX = -menuWidth;
+let menuTargetX = -menuWidth;
+let menuEasing = 0.12;
+let menuItems = ['第一單元作品', '第一單元講義', '測驗系統', '測驗卷筆記', '作品筆記', '回到首頁'];
+let menuLinks = {
+    '測驗系統': 'https://cos1n3nk-cell.github.io/251109/',
+    '測驗卷筆記': 'https://hackmd.io/@cosine6/H1zDbzRkbe',
+    '作品筆記': 'https://hackmd.io/@cosine6/SJI2KMC1bx',
+    '第一單元作品': 'https://cos1n3nk-cell.github.io/20251027/',
+    '第一單元講義': 'https://hackmd.io/@cosine6/Sy0kF7Asgx'
+};
+let menuTextSize = 32;
+let iframeElem = null; // 新增：iframe 參考
+let backButton = null; // 新增：回去按鈕參考
 
-let circles = []; 
-let popSound; 
-let audioContextStarted = false; // 追蹤音訊是否已因用戶點擊而啟動
-
-// 新增：遊戲相關變數
-let score = 0;
-const fixedText = "414730084";
-const textColor = '#eb6424'; // 文字顏色：eb6424
-const textSizeVal = 32; // 文字大小：32px
-
-
-// ====================================================================
-// preload 函式 - 載入檔案
-// ====================================================================
-function preload() {
-    // 假設你的 pop.mp3 在 assets 資料夾內
-    popSound = loadSound(['assets/pop.mp3']); 
-}
-
-
-// ====================================================================
-// ExplosionParticle 類別：模擬爆破後的碎片
-// ====================================================================
-class ExplosionParticle {
-    constructor(x, y, particleColor) {
-        this.x = x;
-        this.y = y;
-        this.color = particleColor;
-        this.lifespan = 255; 
-        this.size = random(2, 5); 
-        
-        this.angle = random(TWO_PI); 
-        this.speed = random(1, 4);
-        this.vx = cos(this.angle) * this.speed;
-        this.vy = sin(this.angle) * this.speed;
-        this.gravity = 0.05; 
-    }
-
-    update() {
-        this.vx *= 0.95; 
-        this.vy += this.gravity; 
-        this.x += this.vx;
-        this.y += this.vy;
-        this.lifespan -= 5; 
-    }
-
-    display() {
-        let displayColor = color(red(this.color), green(this.color), blue(this.color), this.lifespan);
-        fill(displayColor);
-        noStroke();
-        circle(this.x, this.y, this.size);
-    }
-
-    isFinished() {
-        return this.lifespan < 0;
-    }
-}
-
-
-// ====================================================================
-// Circle 類別：氣球本體
-// ====================================================================
-class Circle {
-    constructor() {
-        this.reset();
-        this.particles = []; 
-        this.exploded = false; 
-    }
-    
-    reset() {
-        this.colorHex = random(COLORS).substring(1); 
-        let r = parseInt(this.colorHex.substring(0, 2), 16);
-        let g = parseInt(this.colorHex.substring(2, 4), 16);
-        let b = parseInt(this.colorHex.substring(4, 6), 16);
-        
-        this.alpha = random(50, 200); 
-        this.color = color(r, g, b, this.alpha); 
-        this.diameter = random(50, 200); 
-        
-        this.x = random(width); 
-        this.y = random(height, height + 200); 
-        this.speed = random(0.5, 3.0); 
-
-        this.exploded = false;
-        this.particles = [];
-    }
-
-    // 新增：檢查滑鼠是否點擊在氣球上
-    isClicked(mx, my) {
-        let d = dist(mx, my, this.x, this.y);
-        return d < this.diameter / 2;
-    }
-
-    explode() {
-        this.exploded = true;
-        
-        // 播放音效：只有在 audioContextStarted 為 true 時才播放
-        if (popSound && audioContextStarted) { 
-            // 避免疊音太多，只在音效沒播放時才啟動
-            if (!popSound.isPlaying()) {
-                popSound.play();
-            }
-        }
-        
-        // 產生碎片
-        for (let i = 0; i < 15; i++) {
-            this.particles.push(new ExplosionParticle(this.x, this.y, this.color));
-        }
-    }
-
-    move() {
-        if (this.exploded) {
-            // 更新碎片
-            for (let i = this.particles.length - 1; i >= 0; i--) {
-                this.particles[i].update();
-                if (this.particles[i].isFinished()) {
-                    this.particles.splice(i, 1);
-                }
-            }
-            if (this.particles.length === 0) {
-                this.reset();
-            }
-            return; 
-        }
-
-        this.y -= this.speed;
-
-        // *** 移除隨機爆破邏輯 (氣球只會因滑鼠點擊而爆破) ***
-
-        if (this.y < -this.diameter / 2) {
-            this.reset();
-        }
-    }
-
-    display() {
-        if (this.exploded) {
-            for (let p of this.particles) {
-                p.display();
-            }
-            return;
-        }
-        
-        noStroke(); 
-        fill(this.color); 
-        circle(this.x, this.y, this.diameter); 
-
-        // 繪製星星
-        let radius = this.diameter / 2;
-        let starOuterRadius = this.diameter / 6; 
-        let starInnerRadius = starOuterRadius / 2.5; 
-        let distance = radius / 2;
-        let starX = this.x + distance * cos(PI / 4); 
-        let starY = this.y - distance * sin(PI / 4);
-
-        fill(255, 150); 
-        noStroke(); 
-
-        drawStar(starX, starY, starOuterRadius, starInnerRadius, 5);
-    }
-}
-
-
-// ====================================================================
-// drawStar 函數
-// ====================================================================
-function drawStar(x, y, radius1, radius2, npoints) {
-    let angle = TWO_PI / npoints;
-    let halfAngle = angle / 2.0;
-    
-    push();
-    translate(x, y); 
-    
-    beginShape();
-    for (let a = 0; a < TWO_PI; a += angle) {
-        let sx = cos(a) * radius2; 
-        let sy = sin(a) * radius2;
-        vertex(sx, sy);
-        sx = cos(a + halfAngle) * radius1; 
-        sy = sin(a + halfAngle) * radius1;
-        vertex(sx, sy);
-    }
-    endShape(CLOSE);
-    pop(); 
-}
-
-
-// ====================================================================
-// p5.js 核心函數：setup, mousePressed, draw
-// ====================================================================
 function setup() {
-    createCanvas(windowWidth, windowHeight); 
-    angleMode(RADIANS); 
-    
-    for (let i = 0; i < NUM_CIRCLES; i++) {
-        circles.push(new Circle());
-    }
-
-    // 啟動時先停止 draw 迴圈
-    noLoop(); 
-}
-
-function mousePressed() {
-    // 第一次點擊：啟動音訊環境
-    if (!audioContextStarted) {
-        userStartAudio(); 
-        
-        // 嘗試播放一次並停止，確保瀏覽器完全解鎖 AudioContext
-        if (popSound) {
-            popSound.play();
-            popSound.stop();
-        }
-        
-        audioContextStarted = true;
-        loop(); // 啟動 draw 迴圈
-    } 
-    
-    // 音訊已啟動：處理點擊氣球的遊戲邏輯
-    else {
-        for (let i = circles.length - 1; i >= 0; i--) {
-            let circle = circles[i];
-            
-            // 檢查是否點擊到未爆破的氣球
-            if (!circle.exploded && circle.isClicked(mouseX, mouseY)) {
-                
-                // 執行計分邏輯
-                switch (circle.colorHex) {
-                    case 'ff595e': // 紅色
-                        score += 1;
-                        break;
-                    case 'ffca3a': // 黃色
-                        score += 2;
-                        break;
-                    case '1982c4': // 藍色
-                        score += 1;
-                        break;
-                    default: // 其他顏色 (綠、紫)
-                        score -= 1;
-                        break;
-                }
-                
-                // 爆破氣球
-                circle.explode();
-                
-                // 一次點擊只爆破一個氣球
-                break; 
-            }
-        }
-    }
+	createCanvas(windowWidth, windowHeight);
+	rectMode(CENTER);
+	ctx = drawingContext;
+	INIT();
 }
 
 function draw() {
-    background(0); 
-    
-    if (!audioContextStarted) {
-        // 音訊未啟動時顯示提示
-        fill(255);
-        textAlign(CENTER, CENTER);
-        textSize(24);
-        text("點擊畫面以開始 (啟用音效並開始遊戲)", width / 2, height / 2);
+    background('#eff7f6');
+    for (let m of motions) {
+        m.run();
+    }
+
+    let alph = 0;
+    if ((resetTime - fadeOutTime) < sceneTimer && sceneTimer <= resetTime) {
+        alph = map(sceneTimer, (resetTime - fadeOutTime), resetTime, 0, 255);
+        background(255, alph);
+
+    }
+
+    if (frameCount % resetTime == 0) {
+        INIT();
+    }
+
+    sceneTimer++;
+
+    // 新增：選單滑出邏輯（當滑鼠在最左側 100px 時滑出）
+    if (mouseX <= 100) {
+        menuTargetX = 0;
     } else {
-        // 正常運行程式 (遊戲進行中)
-        for (let i = 0; i < circles.length; i++) {
-            circles[i].move();    
-            circles[i].display(); 
+        menuTargetX = -menuWidth;
+    }
+    menuX = lerp(menuX, menuTargetX, menuEasing);
+
+    // 在最上層繪製選單
+    drawMenu();
+}
+
+function INIT() {
+	sceneTimer = 0;
+	motions = [];
+	motionClasses = [Motion01, Motion02, Motion03, Motion04, Motion05];
+	let drawingRegion = width * 0.75;
+	let cellCount = 25;
+	let cellSize = drawingRegion / cellCount;
+	let clr = '#415a77';
+	for (let i = 0; i < cellCount; i++) {
+		for (let j = 0; j < cellCount; j++) {
+			let x = cellSize * j + (cellSize / 2) + (width - drawingRegion) / 2;
+			let y = cellSize * i + (cellSize / 2) + (height - drawingRegion) / 2;
+			let MotionClass = random(motionClasses);
+			let t = -int(dist(x, y, width / 2, height / 2) * 0.7);
+			motions.push(new MotionClass(x, y, cellSize, t, clr));
+		}
+	}
+}
+
+function easeInOutQuint(x) {
+	return x < 0.5 ? 16 * x * x * x * x * x : 1 - Math.pow(-2 * x + 2, 5) / 2;
+}
+
+class Agent {
+	constructor(x, y, w, t, clr) {
+		this.x = x;
+		this.y = y;
+		this.w = w;
+
+		this.t1 = int(random(30, 100));
+		this.t2 = this.t1 + int(random(30, 100));
+		this.t = t;
+		this.clr2 = color(clr);
+		this.clr1 = color(random(colors));
+		this.currentColor = this.clr1;
+	}
+
+	show() {
+	}
+
+	move() {
+		if (0 < this.t && this.t < this.t1) {
+			let n = norm(this.t, 0, this.t1 - 1);
+			this.updateMotion1(easeInOutQuint(n));
+		} else if (this.t1 < this.t && this.t < this.t2) {
+			let n = norm(this.t, this.t1, this.t2 - 1);
+			this.updateMotion2(easeInOutQuint(n));
+		}
+		this.t++;
+	}
+
+	run() {
+		this.show();
+		this.move();
+	}
+
+	updateMotion1(n) {
+
+	}
+	updateMotion2(n) {
+
+	}
+
+}
+
+class Motion01 extends Agent {
+	constructor(x, y, w, t, clr) {
+		super(x, y, w, t, clr);
+		this.shift = this.w * 3;
+		this.ang = int(random(4)) * (TAU / 4);
+		this.size = 0;
+	}
+
+	show() {
+		noStroke();
+		fill(this.currentColor);
+		square(this.x + this.shift * cos(this.ang), this.y + this.shift * sin(this.ang), this.size);
+	}
+
+	updateMotion1(n) {
+		this.shift = lerp(this.w * 3, 0, n);
+		this.size = lerp(0, this.w, n);
+		this.currentColor = lerpColor(this.clr1, this.clr2, n);
+	}
+}
+
+class Motion02 extends Agent {
+	constructor(x, y, w, t, clr) {
+		super(x, y, w, t, clr);
+		this.shift = this.w * 2;
+		this.ang = int(random(4)) * (TAU / 4);
+		this.size = 0;
+		this.corner = this.w / 2;
+	}
+
+	show() {
+		noStroke();
+		fill(this.currentColor);
+		square(this.x + this.shift * cos(this.ang), this.y + this.shift * sin(this.ang), this.size, this.corner);
+	}
+
+	updateMotion1(n) {
+		this.shift = lerp(0, this.w * 2, n);
+		this.size = lerp(0, this.w / 2, n);
+	}
+
+	updateMotion2(n) {
+		this.size = lerp(this.w / 2, this.w, n);
+		this.shift = lerp(this.w * 2, 0, n);
+		this.corner = lerp(this.w / 2, 0, n);
+		this.currentColor = lerpColor(this.clr1, this.clr2, n);
+	}
+}
+
+class Motion03 extends Agent {
+	constructor(x, y, w, t, clr) {
+		super(x, y, w, t, clr);
+		this.shift = this.w * 2;
+		this.ang = 0;
+		this.size = 0
+	}
+
+	show() {
+		push();
+		translate(this.x, this.y);
+		rotate(this.ang);
+		noStroke();
+		fill(this.currentColor);
+		square(0, 0, this.size);
+		pop();
+	}
+
+	updateMotion1(n) {
+		this.ang = lerp(0, TAU, n);
+		this.size = lerp(0, this.w, n);
+		this.currentColor = lerpColor(this.clr1, this.clr2, n);
+
+	}
+}
+
+class Motion04 extends Agent {
+	constructor(x, y, w, t, clr) {
+		super(x, y, w, t, clr);
+		this.shift = this.w * 2;
+		this.ang = int(random(4)) * (TAU / 4);
+		this.rot = PI;
+		this.side = 0;
+	}
+
+	show() {
+		push();
+		translate(this.x, this.y);
+		rotate(this.ang);
+		translate(-this.w / 2, -this.w / 2);
+		rotate(this.rot);
+		fill(this.currentColor);
+		rect(this.w / 2, (this.w / 2) - (this.w - this.side) / 2, this.w, this.side);
+		pop();
+	}
+
+	updateMotion1(n) {
+		this.side = lerp(0, this.w, n);
+	}
+
+	updateMotion2(n) {
+		this.currentColor = lerpColor(this.clr1, this.clr2, n);
+		this.rot = lerp(PI, 0, n);
+	}
+}
+
+class Motion05 extends Agent {
+	constructor(x, y, w, t, clr) {
+		super(x, y, w, t, clr);
+		this.shift = this.w / 2;
+		this.size = 0;
+	}
+
+	show() {
+		push();
+		translate(this.x, this.y);
+		for (let i = 0; i < 4; i++) {
+			fill(this.currentColor);
+			square((this.w / 4) + this.shift, (this.w / 4) + this.shift, this.size);
+			rotate(TAU / 4);
+		}
+		pop();
+	}
+
+	updateMotion1(n) {
+		this.size = lerp(0, this.w / 4, n);
+	}
+
+	updateMotion2(n) {
+		this.currentColor = lerpColor(this.clr1, this.clr2, n);
+		this.shift = lerp(this.w / 2, 0, n);
+		this.size = lerp(this.w / 4, this.w / 2, n);
+
+	}
+}
+
+// 新增：繪製選單（文字大小 32px）
+function drawMenu() {
+    push();
+    translate(menuX, 0);
+
+    // 背景
+    noStroke();
+    fill('#2b2b2b');
+    rect(menuWidth / 2, height / 2, menuWidth, height);
+
+    // 選單文字
+    textSize(menuTextSize);
+    textAlign(LEFT, TOP);
+
+    let startY = 80;
+    let gap = 88;
+    for (let i = 0; i < menuItems.length; i++) {
+        let y = startY + i * gap;
+        // 判斷滑鼠是否在選單與該項目上（考慮 menuX 偏移）
+        let relMouseX = mouseX - menuX;
+        let hovered = relMouseX >= 0 && relMouseX <= menuWidth && mouseY >= y && mouseY <= y + 48;
+
+        if (hovered) {
+            fill('#ffd166'); // hover 顏色
+        } else {
+            fill(255); // 文字顏色
         }
-        
-        // 顯示固定文字與分數
-        
-        // 設置文字樣式
-        fill(textColor);
-        textSize(textSizeVal);
-        
-        // 左上角文字
-        textAlign(LEFT, TOP);
-        text(fixedText, 20, 20); // 20px 邊距
-        
-        // 右上角分數
-        textAlign(RIGHT, TOP);
-        text(`分數: ${score}`, width - 20, 20); // 20px 邊距
+        // 左內距 40
+        text(menuItems[i], 40, y);
+    }
+    pop();
+}
+
+// 新增：顯示 / 隱藏 / 調整 iframe 的函式
+function showIframe(url) {
+    if (!iframeElem) {
+        iframeElem = createElement('iframe');
+        iframeElem.style('border', 'none');
+        iframeElem.attribute('frameborder', '0');
+        iframeElem.style('position', 'fixed');
+        iframeElem.style('z-index', '9999');
+        iframeElem.style('background', '#ffffff');
+        iframeElem.style('box-shadow', '0 8px 24px rgba(0,0,0,0.4)');
+    }
+    
+    let w = floor(windowWidth * 0.8);
+    let h = floor(windowHeight * 0.8);
+    let left = floor((windowWidth - w) / 2);
+    let top = floor((windowHeight - h) / 2);
+    
+    iframeElem.size(w, h);
+    iframeElem.position(left, top);
+    iframeElem.attribute('src', url);
+    iframeElem.show();
+    
+    // 創建或顯示回去按鈕
+    if (!backButton) {
+        backButton = createButton('離開');
+        backButton.position(20, 20);
+        backButton.style('padding', '10px 20px');
+        backButton.style('background-color', '#7bdff2');
+        backButton.style('border', 'none');
+        backButton.style('border-radius', '5px');
+        backButton.style('cursor', 'pointer');
+        backButton.style('font-size', '16px');
+        backButton.style('color', '#2b2b2b');
+        backButton.style('z-index', '10000');
+        backButton.mouseOver(() => backButton.style('background-color', '#b2f7ef'));
+        backButton.mouseOut(() => backButton.style('background-color', '#7bdff2'));
+        backButton.mousePressed(() => {
+            hideIframe();
+            INIT();
+            backButton.hide();
+        });
+    }
+    backButton.show();
+}
+
+function hideIframe() {
+    if (iframeElem) {
+        iframeElem.hide();
+    }
+    if (backButton) {
+        backButton.hide();
+    }
+}
+
+function mousePressed() {
+    if (mouseX >= menuX && mouseX <= menuX + menuWidth) {
+        let startY = 80;
+        let gap = 88;
+        for (let i = 0; i < menuItems.length; i++) {
+            let y = startY + i * gap;
+            if (mouseY >= y && mouseY <= y + 48) {
+                let menuItem = menuItems[i];
+                if (menuLinks[menuItem]) {
+                    showIframe(menuLinks[menuItem]);
+                } else if (menuItem === '回到首頁') {
+                    hideIframe();
+                    INIT();
+                }
+                break;
+            }
+        }
     }
 }
 
 function windowResized() {
     resizeCanvas(windowWidth, windowHeight);
+    if (iframeElem && iframeElem.style('display') !== 'none') {
+        let w = floor(windowWidth * 0.8);
+        let h = floor(windowHeight * 0.8);
+        let left = floor((windowWidth - w) / 2);
+        let top = floor((windowHeight - h) / 2);
+        iframeElem.size(w, h);
+        iframeElem.position(left, top);
+    }
 }
